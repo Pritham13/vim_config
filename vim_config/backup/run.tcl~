@@ -1,0 +1,39 @@
+#Switch to DPV mode
+set_fml_appmode DPV
+
+#Must configure file host.qsub based on local environment
+#set_host_file "host.qsub"
+
+
+proc compile_spec {} {
+  create_design -name spec -top DPV_wrapper
+  cppan -I. ../c/alu.cpp 
+  compile_design spec 
+}
+
+
+proc compile_impl {} {
+  create_design -name impl -top alu -clock clk -reset reset 
+## RTL lab case with bug injectionn
+##vcs -sverilog ../rtl/multiplier_bug.sv ../rtl/alu_bug.sv
+ ##RTL lab case without bug injectionn
+  vcs -sverilog ../solution/multiplier.sv ../solution/alu.sv 
+  compile_design impl
+}
+
+
+proc global_assumes {} {
+  map_by_name -inputs -specphase 1 -implphase 1
+  assume command_range = spec.command(1) < 6
+}
+
+proc ual {} {
+
+  global_assumes
+   
+  lemma result_equal_small = impl.valid(1) && impl.size(1) == 0 -> impl.result(3)[15:0] == spec.result(1)[15:0]
+  lemma result_equal_big = impl.valid(1) && impl.size(1) == 1  -> impl.result(3) == spec.result(1)
+  lemma signal_equal = impl.valid(1) -> impl.signal(3)[1:0] == spec.signal(1)[1:0]
+}
+
+set_user_assumes_lemmas_procedure "ual"

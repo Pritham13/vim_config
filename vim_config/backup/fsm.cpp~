@@ -1,0 +1,106 @@
+// Note : check DPV spec pg 120 for more info on state variables
+#include <iostream>
+#include <cstdint>
+#include <Hector.h>
+
+    // States definition
+    enum State {
+        STATE_0 = 0,
+        STATE_1 = 1,
+        STATE_2 = 2,
+        STATE_3 = 3,
+        STATE_4 = 4,
+        STATE_5 = 5,
+        STATE_6 = 6,
+        STATE_7 = 7
+    };
+
+    // State variables in namespace scope
+    State currentState = STATE_0;
+
+
+    int update(bool rst , bool A, bool B,uint8_t &state ,uint8_t &op) {
+        
+        State nextState = currentState;
+        // Update current state
+        static currentState = nextState;
+
+        if (rst) {
+            currentState = STATE_0;
+            op = 0;
+        }
+
+        // State transition logic
+        switch (currentState) {
+            case STATE_0:
+                if (A) nextState = STATE_1;
+                if (B) nextState = STATE_2;
+                break;
+
+            case STATE_1:
+                if (A) nextState = STATE_5;
+                if (B) nextState = STATE_2;
+                break;
+
+            case STATE_2:
+                if (A) nextState = STATE_3;
+                break;
+
+            case STATE_3:
+                if (A) nextState = STATE_4;
+                if (B) nextState = STATE_2;
+                break;
+
+            case STATE_4:
+                nextState = STATE_1;
+                break;
+
+            case STATE_5:
+                if (A) nextState = STATE_6;
+                break;
+
+            case STATE_6:
+                if (B) nextState = STATE_5;
+                break;
+
+            case STATE_7:
+                if (A) nextState = STATE_3;
+                break;
+        }
+
+        // Update output X based on current state
+        switch (currentState) {
+            case STATE_4:
+                op = 1;
+                break;
+            case STATE_7:
+                op = 2;
+                break;
+            default:
+                op = 0;
+                break;
+        }
+
+        state = currentState;
+        return 0 ;
+
+    }
+
+int DPV_wrapper () {
+   bool rst;
+   bool A;
+   bool B;
+   uint8_t op; 
+   uint8_t state; 
+
+    Hector::registerInput ("rst",rst);
+    Hector::registerInput ("A",A);
+    Hector::registerInput ("B",B);
+    Hector::registerOutput ("op",op);
+    Hector::registerOutput ("state",state);
+
+    Hector::beginCapture();
+    update(rst,A,B,state,op) ;
+    Hector::endCapture();
+}
+// end of file

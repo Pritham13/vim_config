@@ -1,0 +1,215 @@
+import tl_package::*;
+
+module traffic_light_controller
+(
+    input int 	 index, 
+    input logic  clk,
+    input logic  rst,
+    input logic  cars_waiting, 
+    input logic  emergency,
+    input logic  request_in,
+    input logic  any_emergency,
+    input logic  yield_in,
+    output logic request_out,
+    output logic yield_out,
+    output 	 tl_color_e light_out);
+
+
+   // Internal variables
+   tl_state_e curr_state;
+   tl_state_e next_state;   
+
+
+   // Always block to update the current state at
+   // every clock edge
+   always @(posedge clk or negedge rst) begin
+       if (~rst) begin
+            if( (index == 0)) begin
+                curr_state <= ST_GREEN;
+            end
+            else begin
+                curr_state <= ST_RED; // Default state if none of the conditions are met
+            end
+        end
+        else begin
+                curr_state <= next_state;
+            end
+   end
+  //always @ (posedge clk) begin
+  //     curr_state <= next_state;
+  // end
+
+
+
+   // Next state computation logic
+   
+   always_comb 
+   begin
+
+      case (curr_state) 
+
+          ST_RED :
+	     if(yield_in)
+	       next_state = ST_GREEN;
+	     else 
+	       next_state = ST_RED; 
+
+          ST_GREEN :
+	     if(!cars_waiting && request_in)
+	       next_state = ST_YELLOW;
+	     else
+	       next_state = ST_GREEN;
+
+          ST_YELLOW:  
+	      next_state = ST_RED;
+
+          default: 
+              //next_state = ST_INVALID;
+              next_state = ST_RED;
+	
+      endcase
+
+      // If there are emergency situtations to deal then 
+      // we will have override the normal operations with 
+      // emergency overrides
+
+      if (emergency) 
+      begin
+          next_state = ST_EMERGENCY;
+      end 
+      else if (curr_state == ST_EMERGENCY) 
+      begin
+          next_state = ST_GREEN;
+      end 
+      else if (any_emergency) 
+      begin
+          if (curr_state == ST_GREEN)
+	  begin
+              next_state = ST_YELLOW;
+	  end
+      end     
+   end // always_comb
+   
+
+   always_comb 
+     begin
+	request_out = 1'b0;
+	yield_out = 1'b0;
+
+	case (curr_state) 
+	
+	    ST_RED:
+            begin
+                if(cars_waiting) begin
+                    request_out = 1;
+                end
+                light_out = TL_RED;
+            end
+
+	    ST_YELLOW:
+            begin
+                yield_out = 1'b1;
+                light_out = TL_YELLOW;
+                request_out = 1'b0;
+            end
+
+	    ST_GREEN:
+            begin
+                light_out = TL_GREEN;
+                yield_out = 1'b0;
+                request_out = 1'b0;
+            end
+	  
+	    default:
+	        light_out = TL_GREEN;
+	endcase // case (curr_state)
+	
+     end // always_comb
+
+
+   // Fixme 1:  begin   
+   // Add default clocking info for the FV tool. Use the posedge
+   // of the clk signal as the default clocking and also disable
+   // the assertions iff "rst" signal is low 
+   
+   // insert clk/rst info
+   default clocking cb @ (posedge clk) ;endclocking
+   default disable iff (~rst);
+
+   // Fixme 1:  end
+
+
+   // Fixme 2(a): begin
+   // Create a set of cover  properties to ensure that each state in 
+   // the state machine (specified in the enum datatype tl_states_e 
+   // is reachable. You would need a cover property for each state
+   // As there are many states you can use generate for to specify 
+   // this cover property for each state
+   // Hint:  You may want to leave out ST_INVALID as it should not be
+   // reachable anyways
+
+   // insert property for C1
+   genvar i;
+   generate
+           for (i = 1; i < 4 ; i = i + 1) begin
+                cover property (curr_state == i);
+           end
+   endgenerate
+  //can_go_to_invalid : cover property (curr_state == ST_INVALID);
+  //can_go_to_others : cover property (curr_state == ST_RED);
+
+   
+   
+   // Fixme 2(a):  end
+
+
+   // Fixme 2(b): begin
+   // Create a set of cover  properties to ensure that each color
+   // in tl_colors_e is reachable. You would need a cover property 
+   // for each color
+   // As  there are many colors you can use generate in verilog
+   // to specify  this cover property for each color
+
+   // insert property for C2
+   genvar i;
+   generate
+           for (i = 0; i <3 ; i = i + 1) begin
+                cover property (light_out == i);
+           end
+   endgenerate
+
+
+   // Fixme 2(b):  end
+
+
+   // Fixme 3:  begin   
+   // Add a property that if the curr_state is ST_RED and there
+   // are cars waiting, the curr_state will eventually become  ST_GREEN
+   assert_red_to_green_eventually : assert property (((curr_state == ST_RED)&&(cars_waiting &&(yield_in)&& (~emergency)&&(~any_emergency)))
+                                         |=> (s_eventually (curr_state == ST_GREEN))); 
+  //   
+   // insert property for P2
+
+   // Fixme 3:  end      
+
+   
+   // Fixme 4:  begin      
+   // Add a property to say that whenever there is a emergency
+   // then the light_out will become TL_GREEN in two cycles.      
+
+   // insert property for P3
+   //assert_emergency_light_out_green : assert property ((emergency  ) |-> ##2 (light_out == TL_GREEN));
+
+   //// Fixme 4:  end
+
+   //
+   //// Fixme 5:  begin   
+   ////Add a property to indicate that the curr_state will never be ST_INVALID
+   assert_nev_will_go_to_invalid_state : assert  property  (curr_state != ST_INVALID);
+  
+   // insert property for P4
+
+   //Fixme 5: end 
+
+endmodule
+

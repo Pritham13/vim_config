@@ -1,0 +1,199 @@
+
+import tl_package::*;
+
+module traffic_junction
+               (input logic       clk, 
+		input logic       rst,        
+                input logic [3:0] cars_waiting, 
+		input logic [3:0] emergency,
+                output tl_color_e lights[3:0]);
+
+
+   logic [3:0] 	       request_out;
+   logic [3:0] 	       emergency_out;
+   logic [3:0]         yield_out;
+
+   logic 	       any_emergency;
+
+
+   assign any_emergency = |emergency;
+
+//`define GENLOOP
+`ifdef GENLOOP
+   genvar 	       idx;
+   generate 
+      for (idx=0; idx<4; idx++) 
+      begin : light_inst_loop
+	  int prev_idx  =  (idx == 0) ? 3 : (idx - 1);
+ 	  int next_idx  =  (idx == 3) ? 0 : (idx + 1);
+  	  traffic_light_controller traffic_light_controller_inst
+	        (.index(idx), 
+		 .clk(clk),
+		 .rst(rst),
+		 .cars_waiting(cars_waiting[idx]),
+		 .emergency(emergency[idx]),
+                 .request_in(request_out[prev_idx]),
+		 .any_emergency(any_emergency),
+		 .yield_in(yield_out[next_idx]),
+                 .request_out(request_out[idx]),
+		 .yield_out(yield_out[idx]),
+                 .light_out(lights[idx]));
+     end
+   endgenerate
+`else
+
+  	  traffic_light_controller traffic_light_controller_inst0 //idx=0
+	        ( .index(0),
+                 .clk(clk), 
+                 .rst(rst),
+        //         .index(rst_for_green[0]),
+		 .cars_waiting(cars_waiting[0]), 
+                 .emergency(emergency[0]),
+                 .request_in(request_out[3]), 
+                 .any_emergency(any_emergency),
+		 .yield_in(yield_out[1]), 
+                 .request_out(request_out[0]),
+		 .yield_out(yield_out[0]), 
+                 .light_out(lights[0]));
+
+  	  traffic_light_controller traffic_light_controller_inst1 //idx=1
+	        (.index(1), 
+                 .clk(clk), 
+                 .rst(rst),
+                 //.index(rst_for_green[1]),
+		 .cars_waiting(cars_waiting[1]), 
+                 .emergency(emergency[1]),
+                 .request_in(request_out[0]), 
+                 .any_emergency(any_emergency),
+		 .yield_in(yield_out[2]), 
+                 .request_out(request_out[1]),
+		 .yield_out(yield_out[1]), 
+                 .light_out(lights[1]));
+
+  	  traffic_light_controller traffic_light_controller_inst2 //idx=2
+	        (.index(2), 
+                 .clk(clk), 
+                 .rst(rst),
+                 //.index(rst_for_green[2]),
+		 .cars_waiting(cars_waiting[2]), 
+                 .emergency(emergency[2]),
+                 .request_in(request_out[1]), 
+                 .any_emergency(any_emergency),
+		 .yield_in(yield_out[3]), 
+                 .request_out(request_out[2]),
+		 .yield_out(yield_out[2]), 
+                 .light_out(lights[2]));
+
+  	  traffic_light_controller traffic_light_controller_inst3 //idx=3
+	        (.index(3), 
+                 .clk(clk), 
+                 .rst(rst),
+                 //.index(rst_for_green[3]),
+		 .cars_waiting(cars_waiting[3]), 
+                 .emergency(emergency[3]),
+                 .request_in(request_out[2]), 
+                 .any_emergency(any_emergency),
+		 .yield_in(yield_out[0]), 
+                 .request_out(request_out[3]),
+		 .yield_out(yield_out[3]), 
+                 .light_out(lights[3]));
+`endif
+
+   // Fixme 1:  begin   
+   // Add default clocking info for the FV tool. Use the posedge of the "clk"
+   // signal as the default clocking and also disable the assertions
+   // if "rst" signal is low
+   
+   // insert clk/rst info
+   default clocking cb @ (posedge clk) ;endclocking
+   default disable iff (~rst);
+   
+   // Fixme 1:  end
+
+
+   // Fixme 2: begin   
+   // Add a assumption that any_emergency is 0. This implies that
+   // there is no emergency in any of the directions. 
+   // Call this property "no_emergency"
+
+   // insert property for A1
+   no_emergency : assume property (any_emergency ==  0);
+
+   // Fixme 2:  end
+
+
+   // Fixme 3: begin
+   // Write some auxilliary code to count the number greens and yellows
+   // in the intersection. These counts  can be useful when  writing other 
+   // assertions.
+   // Hint Declare two variables num_greens and num_yellows. Use an always
+   // comb block to update these two variables whenever any light in the
+   // intersection changes. 
+
+   // insert aux code for P1
+   logic [3:0]num_green ,num_yellow;
+   
+  //can_go_to_invalid : cover property (traffic_light_controller_inst0.curr_state == ST_INVALID);
+  //can_go_to_others : cover property (traffic_light_controller_inst0.curr_state == ST_GREEN);
+  logic is_green[3:0];
+  logic is_yellow[3:0];
+  always @ (posedge clk or negedge rst) begin
+      if (~rst) begin
+          num_green <= 0;
+          num_yellow <= 0;
+      end
+      else begin
+          // Individual variables for each light
+          
+          // Check light 0
+          is_green[0] = (lights[0] == TL_GREEN); 
+          is_yellow[0] = (lights[0] == TL_YELLOW) ? 1'b1 : 1'b0;
+          
+          // Check light 1
+          is_green[1] = (lights[1] == TL_GREEN) ? 1'b1 : 1'b0;
+          is_yellow[1] = (lights[1] == TL_YELLOW) ? 1'b1 : 1'b0;
+          
+          // Check light 2
+          is_green[2] = (lights[2] == TL_GREEN) ? 1'b1 : 1'b0;
+          is_yellow[2] = (lights[2] == TL_YELLOW) ? 1'b1 : 1'b0;
+
+          // Check light 3
+          is_green[3] = (lights[3] == TL_GREEN) ? 1'b1 : 1'b0;
+          is_yellow[3] = (lights[3] == TL_YELLOW) ? 1'b1 : 1'b0;
+          
+          // Sum the counts
+          num_green <= is_green[0] + is_green[1] + is_green[2] + is_green[3];
+          num_yellow <= is_yellow[0] + is_yellow[1] + is_yellow[2] + is_yellow[3];
+      end
+  end
+   // Fixme 3:  end
+
+
+   // Fixme 4: begin   
+   // Add a  property to check that only one light is non-red
+   // Hit: num_greens plus num_yellows should be 1
+
+   // insert property for P1
+ //  assume property (cars_waiting != 0);
+   can_any_yield : cover property ($countones(yield_out) > 0 );
+   assume_no_change_in_queue_without_gTL_0 : assume property ((cars_waiting[0]&& lights[0] != TL_GREEN) |-> (cars_waiting[0]));
+   assume_no_change_in_queue_without_gTL_1 : assume property ((cars_waiting[1]&& lights[1] != TL_GREEN) |-> (cars_waiting[1]));
+   assume_no_change_in_queue_without_gTL_2 : assume property ((cars_waiting[2]&& lights[2] != TL_GREEN) |-> (cars_waiting[2]));
+   assume_no_change_in_queue_without_gTL_3 : assume property ((cars_waiting[3]&& lights[3] != TL_GREEN) |-> (cars_waiting[3]));
+   //only_one_light_is_non_red :  assert property (($countones(cars_waiting > 0) |=>  (num_green + num_yellow) == 1);
+   only_one_light_is_non_red :  assert property ((num_green + num_yellow) <= 1);
+
+   // Fixme 4: end
+
+
+   // Fixme 5:  begin
+   // Create a property to see that every direction gets a
+   // green in reasonable time within [1:4] cycles. 
+   get_green_in_rotate_direction : cover property ((lights[3] == TL_GREEN) |-> ##[1:20](lights[0] == TL_GREEN)|-> ##[1:20](lights[1] == TL_GREEN)|-> ##[1:20](lights[2] == TL_GREEN) ); 
+
+   // insert property for C3
+
+   // Fixme 5:  end
+
+endmodule
+

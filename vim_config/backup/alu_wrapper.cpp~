@@ -1,0 +1,54 @@
+
+/*
+ * Copyright: Unpublished work. (c) Siemens 2021  All rights reserved.
+ */
+
+
+#include "alu.h"
+#include "alu.h"
+#include <stdint.h>
+
+/**
+ * operand[0] => operand1 
+ * operand[1] => operand2 
+ * size_update => size
+ * command_update => command 
+ * result_update => result
+ * signal_update => signal 
+ */
+//extern void update(int x_in[4], int x_out[2]);
+extern void update (int command, int size, int operand1, int operand2, int result, int signal); 
+
+void alu_wrapper::doit() {
+
+   if (rst) {
+      reset();
+   } else {
+      readData();
+     // update(x_in,x_out);
+      update (command_update,size_update,operand1_update,operand2_update,result_update,signal_update); 
+      writeData();
+   }
+
+}
+
+void alu_wrapper::readData() {
+      operand1_update   =  operand1.read();
+      operand2_update   =  operand2.read();
+      size_update       =  size.read();
+      command_update    =  command.read(); 
+
+}
+
+void alu_wrapper::writeData() {
+      result.write(result_update);
+      signal.write(signal_update);
+}
+
+void alu_wrapper::reset() {
+   // Reset all outputs to 0
+      result.write(0);
+      signal.write(0);
+}
+
+// end of file

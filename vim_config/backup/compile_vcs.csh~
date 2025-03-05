@@ -1,0 +1,11 @@
+
+#!/bin/csh
+vcs -sverilog \
+        +define+AHB_MEM_CTRL \
+        +define+MEM_CTRL \
+	+incdir+${SOC_TESTS} \
+	+incdir+${SOC_TB} \
+	-timescale=1ns/1ns \
+	-f compile.f \
+	+lint=TFIPC-L +lint=PCWM
+

@@ -1,0 +1,79 @@
+module Simple_fsm
+(
+    input wire 	     clk,
+    input wire 	     rst,
+    input wire 	     A,
+    input wire 	     B,
+    output  [2:0] state,
+    output reg [1:0] op
+);
+
+localparam
+    STATE_0 = 3'd0,
+    STATE_1 = 3'd1,
+    STATE_2 = 3'd2,
+    STATE_3 = 3'd3,
+    STATE_4 = 3'd4,
+    STATE_5 = 3'd5,
+    STATE_6 = 3'd6,
+    STATE_7 = 3'd7;
+
+
+reg[2:0] curSt;
+reg[2:0] nxtSt;
+
+always@(posedge clk or posedge rst ) begin
+    //$display("[%0t] A=%0b B=%0b cur=%d nxt=%d", $time, A, B, curSt, nxtSt);
+    if (rst) curSt <= STATE_0;
+    else curSt <= nxtSt;
+end
+
+always@( * ) begin
+    op = 3'b000;
+    case (curSt)
+        STATE_4: begin
+            //op = 2'b10;
+            op = 2'b01;
+        end
+        STATE_7: begin
+            op = 2'b10;
+            //op = 2'b11;
+        end
+    endcase
+end
+
+always@( * ) begin
+    nxtSt = curSt;
+    case (curSt)
+        STATE_0: begin
+            if (A) nxtSt = STATE_1;
+            if (B) nxtSt = STATE_2;
+        end
+        STATE_1: begin
+            if (A) nxtSt = STATE_5;
+            if (B) nxtSt = STATE_2;
+        end
+        STATE_2: begin
+            if (A) nxtSt = STATE_3;
+        end
+        STATE_3: begin
+            if (A) nxtSt = STATE_4;
+            if (B) nxtSt = STATE_2;
+        end
+        STATE_4: begin
+            nxtSt = STATE_1;
+        end
+        STATE_5: begin
+            if (A) nxtSt = STATE_6;
+        end
+        STATE_6: begin
+            if (B) nxtSt = STATE_5;
+        end
+        STATE_7: begin
+            if (A) nxtSt = STATE_3;
+        end
+    endcase
+end
+
+   assign state = curSt;
+endmodule

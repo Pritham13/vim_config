@@ -1,0 +1,2 @@
+${DUT_DIR}/fifo_s.sv 
+${DUT_DIR}/fv1_0.sv 

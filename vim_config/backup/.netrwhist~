@@ -1,0 +1,11 @@
+let g:netrw_dirhistmax  =10
+let g:netrw_dirhist_cnt =9
+let g:netrw_dirhist_1='/home/pritham/developments/AHB/soc/rtl/ahb_top'
+let g:netrw_dirhist_2='/home/pritham/developments/AHB/soc/rtl'
+let g:netrw_dirhist_3='/home/pritham/developments/AHB/soc'
+let g:netrw_dirhist_4='/home/pritham/developments/AHB'
+let g:netrw_dirhist_5='/home/pritham/developments/AHB/ip'
+let g:netrw_dirhist_6='/home/pritham/developments/AHB/ip/common'
+let g:netrw_dirhist_7='/home/pritham/developments/AHB/ip'
+let g:netrw_dirhist_8='/home/pritham/developments/AHB/ip/AHB_common'
+let g:netrw_dirhist_9='/home/pritham/developments/AHB/ip/AHB_common/rtl'

@@ -1,0 +1,11 @@
+let g:netrw_dirhistmax  =10
+let g:netrw_dirhist_cnt =9
+let g:netrw_dirhist_1='/home/rmahesh/junk/func_spec_ex'
+let g:netrw_dirhist_2='/home/reddykumari/development/dv/vk_axi_over_fdi/scripts/axi_initiator_target/compile_vcs'
+let g:netrw_dirhist_3='/home/rahul/vk_axi_over_fdi/ip/tb/axi_initiator_target'
+let g:netrw_dirhist_4='/home/reddykumari/development/dv/vk_axi_over_fdi/scripts/ucie/vcs'
+let g:netrw_dirhist_5='/home/reddykumari/development/dv/vk_axi_over_fdi/scripts/axi_initiator_target/compile_vcs'
+let g:netrw_dirhist_6='/home/reddykumari/development/dv/vk_axi_over_fdi/ip/rtl/memory_controller'
+let g:netrw_dirhist_7='/home/reddykumari/development/dv/vk_axi_over_fdi/ip'
+let g:netrw_dirhist_8='/home/reddykumari/development/dv/vk_axi_over_fdi/ip/packages'
+let g:netrw_dirhist_9='/home/ashwini/development/ucie_phase_1/soc/tb/axi_over_fdi_top'

@@ -1,0 +1,83 @@
+
+// wrapper around FIFO, with FV glue logic
+// this is by 11 injection and checking at output (see fv.jpg for summary)
+
+
+module FIFOFV(input clk, rst);
+        localparam DWIDTH = 8;  // data width
+        localparam FIFOLEN = 8;  // FIFO length
+    wire [DWIDTH-1:0] dout;
+    wire full, empty, wack, rack;
+    logic wreq, rreq;
+    logic [DWIDTH-1:0] din;
+    wire [$clog2(FIFOLEN):0] count;
+    logic wait_for_resp ;
+
+    FIFO1 f2(clk, rst, wreq, rreq, din, dout, full, empty, wack, rack, count);
+
+    //Fixme-1: define the clock and reset signals
+    default clocking @(posedge clk); endclocking
+    default disable iff (~rst);
+    
+    logic [7:0] nd_d ;
+    // env setup
+    assume property (empty |-> !rreq);
+    assume property (full |-> !wreq);
+    assume property (counter <=8);
+    
+
+    logic sampled_out , sampled_in;
+    logic [15:0] counter;
+    logic [7:0] nd_d ;
+    logic nd_time;
+    // counting data items that are inside fifo 
+    assign incr = wreq && !sampled_in ;
+    assign decr = rreq && !sampled_out ;
+
+    always @ (posedge clk or negedge rst )begin 
+        if(!rst)begin 
+           counter<= 16'd0; 
+       end 
+       else begin
+           counter <= counter + incr - decr ;
+       end
+    end
+
+   ///////////////////////////////////////////////////////////////////////////////////////// 
+    // arbritary data sel
+    assume property ($stable(nd_d));
+    //assume property ((nd_d == 57));
+    assume property (nd_time |=> always (!nd_time));
+    // user assumptions
+   //temp assumption start 
+   //assume property ((sampled_in && !empty && !sampled_out) |=> ##1 rreq);
+   //assume property ((sampled_in && !empty && !sampled_out && !rreq) |=> ~ ($stable(rreq));
+   assume property ((!rreq) |=> s_eventually (rreq));
+   //temp assumption end
+/////////////////////////////////////////////////////////////////////////////////////////////
+    // capturing the data going into din 
+    always @ (posedge clk or negedge rst) begin
+        if (!rst)
+            sampled_in <= 0;
+        else if (din == nd_d && incr && nd_time ) 
+           sampled_in <= 1; 
+    end
+    // capturing the data coming out of dout 
+    always @ (posedge clk or negedge rst) begin
+        if (!rst)
+            sampled_out <= 0;
+        else if ((counter == 0) && sampled_in ) 
+           sampled_out <= 1; 
+    end
+
+    /////////////////// covers /////////////////
+    C3 : cover property ( sampled_in |=> s_eventually sampled_out);
+    cover_if_sample_out_can_be_high : cover property (sampled_out);
+
+    // properties
+
+    P1 : assert property ($rose(sampled_out) |-> (dout == nd_d));
+    P2 : assert property (((counter == 0) && $rose(sampled_out)) |-> (dout == nd_d));
+    P3 : assert property ( (sampled_in && !sampled_out )|=> s_eventually $rose(sampled_out));
+    
+endmodule

@@ -1,0 +1,813 @@
+// ###############################################################################
+// Copyright (c)  Verikwest Systems Inc -- All Rights Reserved
+//
+//  NOTICE:  All information contained herein is, and remains the property of
+//  Verikwest Systems Inc or its licensors and is subject to license terms.
+//  The intellectual and technical concepts contained
+//  herein are proprietary to Verikwest Systems Inc. and may be covered by U.S.
+//  and Foreign Patents, patents in process, and are protected by trade secret
+//  or copyright law.  Dissemination of this information or reproduction of this
+//  material is strictly forbidden unless prior written permission is obtained
+//  from Verikwest Systems Inc.
+// ##############################################################################
+
+`ifdef AXI_MEM_CTRL
+    import axi_config_params_pkg::*;
+    import axi_pkg::*;
+`elsif AHB_MEM_CTRL
+    import ahb_pkg::*;
+`else
+    import apb_pkg::*;
+`endif
+module memory_controller #(parameter TOTAL_MSG = 20,
+    parameter MEM_DEPTH = 2**16) (
+
+    input                               aclk,
+    input                               aresetn,
+
+`ifdef AXI_MEM_CTRL
+    input mem_req_info_s                 mem_req_fifo_pkt_ip,
+    output mem_resp_info_s               mem_resp_fifo_pkt_op,
+`elsif AHB_MEM_CTRL 
+    input req_data_s                     mem_req_fifo_pkt_ip,
+    output resp_data_s                   mem_resp_fifo_pkt_op,
+`else
+    input initiator_out_s                mem_req_fifo_pkt_ip,
+    output initiator_in_s                mem_resp_fifo_pkt_op,
+`endif
+
+    output logic                        mem_req_fifo_rreq,
+    input                               mem_req_fifo_empty,
+    input                               mem_req_fifo_rack,
+
+    output logic                        mem_resp_fifo_wreq,
+    input                               mem_resp_fifo_full,
+    input                               mem_resp_fifo_wack,
+`ifdef AXI_MEM_CTRL
+    output logic [AXI_ADDR_WIDTH-1:0]   address,
+    input  logic [AXI_DATA_WIDTH-1:0]   data_in,
+    output logic [AXI_DATA_WIDTH-1:0]   data_out,
+    output logic                        rw    // rw =1 write operation; rw = 0 read operation
+
+`elsif AHB_MEM_CTRL 
+    output logic [AHB_ADDRESS_WIDTH-1:0]   address,
+    input  logic [AHB_DATA_WIDTH-1:0]   data_in,
+    output logic [AHB_DATA_WIDTH-1:0]   data_out,      //########## AHB_DATA_WIDTH Parameter is not declared anywhere ##########//
+    output logic                        rw    // rw =1 write operation; rw = 0 read operation
+`else
+    output logic [APB_ADDRESS_WIDTH-1:0]   address,
+    input  logic [APB_DATA_WIDTH-1:0]   data_in,
+    output logic [APB_DATA_WIDTH-1:0]   data_out,
+    output logic                        rw    // rw =1 write operation; rw = 0 read operation
+`endif
+
+    );
+
+logic invalid_waddr;
+logic invalid_raddr;
+
+`ifdef AXI_MEM_CTRL
+    mem_req_info_s curr_req;
+    mem_resp_info_s curr_resp;
+`elsif AHB_MEM_CTRL
+    req_data_s curr_req;
+    resp_data_s curr_resp;
+`else
+    initiator_out_s curr_req;
+`endif
+
+`ifdef AXI_MEM_CTRL
+// Write Operation Variable
+logic [AXI_BURST_LEN_BITS-1:0]  total_beats;    //stores total no of transfers into local variables
+logic [AXI_BURST_LEN_BITS-1:0]  remaining_beats;
+logic [AXI_BURST_LEN_BITS-1:0]  remaining_beats_next;
+logic  [AXI_ADDR_WIDTH-1:0]     wr_trans_addr_next;  
+`endif
+
+`ifdef AHB_MEM_CTRL
+logic [AHB_ADDR_WIDTH-1:0]     wr_trans_addr;
+logic [AHB_MESSAGE_WIDTH-1:0]   wr_full_data_packet;
+`else
+logic  [APB_ADDRESS_WIDTH-1:0]     wr_trans_addr;
+logic [APB_MESSAGE_WIDTH-1:0]   wr_full_data_packet;
+`endif
+
+`ifdef AXI_MEM_CTRL
+//WRAP transaction related variable
+logic [AXI_ADDR_WIDTH-1:0]      lower_wrap_boundary;
+logic [AXI_ADDR_WIDTH-1:0]      upper_wrap_boundary;
+`endif
+
+//Read Operation Variables
+`ifdef AXI_MEM_CTRL
+logic [AXI_MESSAGE_WIDTH-1:0]   rd_full_data_packet;
+logic [AXI_DATA_WIDTH-1:0]   rd_data_packet;
+logic  [AXI_ADDR_WIDTH-1:0]     rd_trans_addr;
+`elsif AHB_MEM_CTRL
+logic [AHB_MESSAGE_WIDTH-1:0]   rd_full_data_packet;
+logic [AHB_DATA_WIDTH-1:0]   rd_data_packet;
+logic  [AHB_ADDRESS_WIDTH-1:0]     rd_trans_addr;
+`else
+logic [APB_MESSAGE_WIDTH-1:0]   rd_full_data_packet;
+logic [APB_DATA_WIDTH-1:0]   rd_data_packet;
+logic  [APB_ADDRESS_WIDTH-1:0]     rd_trans_addr;
+`endif
+
+`ifdef AXI_MEM_CTRL
+logic  [AXI_ADDR_WIDTH-1:0]     rd_trans_addr_next;   
+logic [AXI_VALID_MESSAGE_BYTE_WIDTH-1:0] rd_trans_valid_message_byte;
+`endif
+
+typedef enum logic [3:0] {
+    INITIAL_STATE, 
+    FETCH_REQUEST_STATE, 
+    STORE_REQUEST_STATE, 
+    STORE_WRITE_TRANS_STATE, 
+    WRITE_MEMORY_STATE, 
+    WRITE_ACK_STATE, 
+    FETCH_READ_ADDR_STATE, 
+    STORE_READ_TRANS_STATE, 
+    SET_READ_ADDR_STATE, 
+    RECIEVE_MEM_DATA_STATE, 
+    READ_ACK_STATE
+} mem_state_e;
+
+mem_state_e present_state;
+mem_state_e next_state;
+
+`ifdef AXI_MEM_CTRL
+//To keep count of number of transfers for a transaction
+always @(posedge aclk or negedge aresetn) 
+begin
+   if (~aresetn) 
+     begin
+	remaining_beats <= 1'b0;
+    end 
+   else 
+     begin
+//        if(present_state == WRITE_MEMORY_STATE || present_state == RECIEVE_MEM_DATA)
+          begin
+//	     $display("[%t] Curr Values: Remaining_beats = %h", $time(), remaining_beats);
+//	     $display("[%t] Next Values: Remaining_beats = %h", $time(), remaining_beats_next);
+ 	     remaining_beats <= remaining_beats_next;	     
+        end
+     end // else: !if(~aresetn)
+
+   
+end
+`endif 
+
+//PRESENT_STATE logic
+always @(posedge aclk or negedge aresetn) 
+begin
+   if (~aresetn) 
+     begin
+	present_state <= INITIAL_STATE;
+        `ifdef AXI_MEM_CTRL
+	wr_trans_addr <= 0;
+	rd_trans_addr <= 0;
+        `endif	
+     end 
+   else 
+     begin
+        present_state <= next_state;
+        `ifdef AXI_MEM_CTRL
+        wr_trans_addr <= wr_trans_addr_next;
+        rd_trans_addr <= rd_trans_addr_next;
+        `endif
+     end // else: !if(~aresetn)
+   //$display("[%t] Curr Values: PresState = %s, wr_trans_addr = %h, rd_trans_aadr=%h  upper_addr = %h", $time(),  present_state, wr_trans_addr, rd_trans_addr, upper_wrap_boundary);
+   //$display("[%t] Next Values: NextState = %s, wr_trans_addr = %h, rd_trans_aadr=%h", $time(), next_state, wr_trans_addr_next, rd_trans_addr_next);   
+    
+end
+
+
+//NEXT_STATE logic
+always_comb
+begin
+    case(present_state)
+        INITIAL_STATE:
+        begin 
+            if (mem_req_fifo_empty == 0)
+            begin
+                next_state = FETCH_REQUEST_STATE;
+            end 
+            else 
+            begin
+                next_state = INITIAL_STATE;
+            end
+        end
+
+        FETCH_REQUEST_STATE: 
+        begin 
+            next_state = STORE_REQUEST_STATE;
+        end
+
+        STORE_REQUEST_STATE:  
+        begin
+            `ifdef AXI_MEM_CTRL
+            if((mem_req_fifo_rack == 1'b1) && (curr_req.rw == 1'b1))
+            `elsif AHB_MEM_CTRL
+            if((mem_req_fifo_rack == 1'b1) && (curr_req.hwrite == AHB_WRITE))
+            `else
+            if((mem_req_fifo_rack == 1'b1) && (curr_req.pwrite == 1'b1))
+            `endif
+            begin
+                next_state = STORE_WRITE_TRANS_STATE;    
+            end
+
+            `ifdef AXI_MEM_CTRL
+            else if((mem_req_fifo_rack == 1'b1) && (curr_req.rw == 1'b0))
+            `elsif AHB_MEM_CTRL
+            else if((mem_req_fifo_rack == 1'b1) && (curr_req.hwrite == AHB_READ))
+            `else
+            else if((mem_req_fifo_rack == 1'b1) && (curr_req.pwrite == 1'b0))
+            `endif
+            begin
+                next_state = STORE_READ_TRANS_STATE;    
+            end
+            else
+            begin
+                next_state = STORE_REQUEST_STATE;    
+            end
+        end
+
+        STORE_WRITE_TRANS_STATE:
+        begin
+            `ifdef AXI_MEM_CTRL
+            if(curr_req.addr <= (MEM_DEPTH -1))
+            `elsif AHB_MEM_CTRL
+            if(curr_req.haddr <= (MEM_DEPTH -1))
+            `else
+            if(curr_req.paddr <= (MEM_DEPTH -1))
+            `endif
+            begin
+                next_state = WRITE_MEMORY_STATE;    
+            end
+
+            `ifdef AXI_MEM_CTRL
+            else if( curr_req.addr > (MEM_DEPTH -1))
+            `elsif AHB_MEM_CTRL
+            else if( curr_req.haddr > (MEM_DEPTH -1))
+            `else
+            else if( curr_req.paddr > (MEM_DEPTH -1))
+            `endif
+            begin
+                next_state = WRITE_ACK_STATE;
+            end
+
+            else 
+            begin
+                next_state = STORE_WRITE_TRANS_STATE; 
+            end
+        end
+
+        WRITE_MEMORY_STATE:  
+        begin   
+            `ifdef AXI_MEM_CTRL
+            if(remaining_beats > 1) 
+            begin
+                next_state = WRITE_MEMORY_STATE;
+            end
+
+            else
+            begin
+            `elsif AHB_MEM_CTRL
+                next_state = WRITE_ACK_STATE;
+            `endif
+                next_state = WRITE_ACK_STATE;
+
+            `ifdef AXI_MEM_CTRL
+            end
+            `endif
+        end
+
+        WRITE_ACK_STATE: 
+        begin
+            if (mem_req_fifo_empty == 0 && mem_resp_fifo_full == 0) 
+            begin
+                next_state = FETCH_REQUEST_STATE;
+            end 
+            else 
+            begin
+                next_state = INITIAL_STATE;
+            end
+        end
+
+        STORE_READ_TRANS_STATE:
+        begin
+            `ifdef AXI_MEM_CTRL
+            if(curr_req.addr <= (MEM_DEPTH-1))
+            `elsif AHB_MEM_CTRL
+            if(curr_req.haddr <= (MEM_DEPTH-1))
+            `else
+            if(curr_req.paddr <= (MEM_DEPTH-1))
+            `endif
+            begin
+                next_state = SET_READ_ADDR_STATE;
+            end
+    
+            `ifdef AXI_MEM_CTRL
+            else if(curr_req.addr  > (MEM_DEPTH-1))
+            `elsif AHB_MEM_CTRL
+            else if(curr_req.haddr  > (MEM_DEPTH-1))
+            `else
+            else if(curr_req.paddr  > (MEM_DEPTH-1))
+            `endif
+            begin
+                next_state = READ_ACK_STATE;
+            end
+
+            else 
+            begin
+                next_state = STORE_READ_TRANS_STATE;
+            end
+        end
+        
+        SET_READ_ADDR_STATE:
+        begin 
+            next_state = RECIEVE_MEM_DATA_STATE;
+        end
+
+        RECIEVE_MEM_DATA_STATE:
+        begin
+            `ifdef AXI_MEM_CTRL
+            if(remaining_beats > 1)
+            begin
+                next_state = SET_READ_ADDR_STATE;
+            end
+
+            else
+            begin
+            `endif
+                next_state = READ_ACK_STATE;
+            `ifdef AXI_MEM_CTRL
+           end
+            `endif
+        end
+
+        READ_ACK_STATE:
+        begin
+            if (mem_req_fifo_empty == 0 && mem_resp_fifo_full == 0)
+            begin
+                next_state = FETCH_REQUEST_STATE;
+            end
+            else
+            begin
+                next_state = INITIAL_STATE;
+            end
+        end
+    endcase
+end
+
+
+//OUTPUT logic 
+always_comb 
+begin
+    case (present_state) 
+        INITIAL_STATE: 
+        begin 
+            reset_interface_signals();
+        end
+
+        FETCH_REQUEST_STATE:
+        begin
+            fetch_request();
+        end
+
+        STORE_REQUEST_STATE:
+        begin
+            store_request_info();
+        end
+        
+        STORE_WRITE_TRANS_STATE: 
+        begin
+           `ifdef AXI_MEM_CTRL      //FIX ME!!! : Condition for invalid address//
+            if(curr_req.addr <= (MEM_DEPTH-1))
+           `elsif AHB_MEM_CTRL
+            if(curr_req.haddr > (MEM_DEPTH-1))
+            `else
+            if(curr_req.paddr > (MEM_DEPTH -1))
+            `endif
+            begin
+                invalid_waddr = 1'b1;
+            end
+
+            else 
+            begin
+                invalid_waddr = 1'b0; 
+            end
+
+            update_wr_trans_parameters();
+            reset_interface_signals();
+        end
+
+        WRITE_MEMORY_STATE:
+        begin
+           `ifdef AXI_MEM_CTRL
+           if(curr_req.burst == AXI_FIXED_BURST)
+            begin
+                if(remaining_beats >= 1) 
+                begin
+            `endif
+                    write_into_memory();
+
+           `ifdef AXI_MEM_CTRL
+                    remaining_beats_next = remaining_beats - 1;
+                end
+                else
+                  begin
+                    reset_interface_signals();
+                end
+            end
+
+            else if(curr_req.burst == AXI_INCR_BURST)
+            begin
+                if(remaining_beats >= 1) 
+                begin
+                    write_into_memory();
+		    remaining_beats_next = remaining_beats - 1;
+                    wr_trans_addr_next   = wr_trans_addr + AXI_DATA_WIDTH/8;
+                end
+                else
+                begin
+                    reset_interface_signals();
+                end
+            end
+            
+            else if(curr_req.burst == AXI_WRAP_BURST)
+            begin
+                if(remaining_beats >= 1) 
+                begin
+                    write_into_memory();
+                    remaining_beats_next = remaining_beats - 1;		       
+                    wr_trans_addr_next = wr_trans_addr + AXI_DATA_WIDTH/8;
+                    
+                    if(wr_trans_addr_next == upper_wrap_boundary)
+                    begin
+                        wr_trans_addr_next = lower_wrap_boundary;
+                    end
+                end
+
+                else
+                begin
+                    reset_interface_signals();
+                end
+            end
+            `endif
+        end
+
+        WRITE_ACK_STATE: 
+        begin
+            if(invalid_waddr == 1'b0)
+            begin
+                write_trans_success();
+            end             
+
+            else if (invalid_waddr == 1'b1)
+            begin
+                generate_decode_err_for_write_trans();
+            end
+
+            else
+            begin
+                reset_interface_signals();
+            end 
+        end
+
+
+        STORE_READ_TRANS_STATE:
+        begin
+            // FIX ME : check the condition 
+           `ifdef AXI_MEM_CTRL
+            if(curr_req.addr <= (MEM_DEPTH-1))
+            `elsif AHB_MEM_CTRL
+            if(curr_req.haddr > (MEM_DEPTH-1))
+            `else
+            if(curr_req.paddr > (MEM_DEPTH -1))
+            `endif
+            begin
+                invalid_raddr = 1'b1;
+            end
+
+            else 
+            begin
+                invalid_raddr = 1'b0; 
+            end
+
+            update_rd_trans_parameters();
+            reset_interface_signals();
+        end
+        
+        SET_READ_ADDR_STATE:
+        begin
+               read_from_memory();
+        end
+
+        RECIEVE_MEM_DATA_STATE: 
+        begin
+             `ifdef AXI_MEM_CTRL
+            if(curr_req.burst == AXI_FIXED_BURST)
+            begin
+                if(remaining_beats >= 1)
+                begin
+               `endif
+                    store_data_recieved_from_memory();
+                `ifdef AXI_MEM_CTRL
+                   remaining_beats_next = remaining_beats -1 ;		   
+                end
+                else
+                begin
+                    reset_interface_signals();
+                end
+            end
+
+            else if(curr_req.burst == AXI_INCR_BURST)
+            begin
+                if(remaining_beats >= 1)
+                begin
+                    store_data_recieved_from_memory();
+                    remaining_beats_next = remaining_beats -1 ;		   
+                    rd_trans_addr_next = rd_trans_addr + AXI_DATA_WIDTH/8;
+                end
+                else
+                begin
+                    reset_interface_signals();
+                end
+            end
+            
+            else if(curr_req.burst == AXI_WRAP_BURST)
+            begin
+                if(remaining_beats >= 1) 
+                begin
+                    store_data_recieved_from_memory();
+                    remaining_beats_next = remaining_beats -1 ;		   
+                    rd_trans_addr_next = rd_trans_addr + AXI_DATA_WIDTH/8;
+
+                    if(rd_trans_addr_next == upper_wrap_boundary)
+                    begin
+                        rd_trans_addr_next = lower_wrap_boundary;
+                    end
+                end
+            end
+         `endif
+        end
+
+        READ_ACK_STATE:
+        begin
+            if(invalid_raddr == 1'b0)
+            begin
+                read_trans_success();
+            end             
+
+            else if (invalid_raddr == 1'b1)
+            begin
+                generate_decode_err_for_read_trans();
+            end
+
+            else
+            begin
+                reset_interface_signals();
+            end 
+        end
+    endcase
+end
+
+////////////////////////////////// done till here ///////////////////////////////////
+// *****************************************************************//
+// *****        WRITE TRANSACTION RELATED TASKS                *****//
+// *****************************************************************//
+
+task reset_interface_signals();
+    mem_req_fifo_rreq = 0;
+    mem_resp_fifo_wreq = 0;
+    mem_resp_fifo_pkt_op = 0;
+
+    address = 0;
+    data_out = 0;
+    rw = 0;
+endtask
+
+
+task fetch_request();
+    mem_req_fifo_rreq = 1;
+    mem_resp_fifo_wreq = 0;
+    mem_resp_fifo_pkt_op = 0;
+
+    address = 0;
+    data_out = 0;
+    rw = 0;
+endtask
+
+task store_request_info();
+    mem_req_fifo_rreq = 0; // it shold be high only one cycle 
+    curr_req = mem_req_fifo_pkt_ip;
+    `ifdef MEM_CTRL
+    $display("[%0t]::%m::curr_req =%0h,mem_req_fifo_ip=%0h",$time(),curr_req,mem_req_fifo_pkt_ip);
+    `endif
+endtask
+
+task update_wr_trans_parameters();
+    `ifdef AXI_MEM_CTRL
+    wr_full_data_packet     = curr_req.w_data;
+    wr_trans_addr_next       = curr_req.addr;
+    total_beats             = curr_req.len + 1'b1;    
+   remaining_beats_next    = curr_req.len + 1'b1;
+   
+    //used only for WRAP transaction
+    compute_wr_wrap_trans_info();
+    `elsif AHB_MEM_CTRL
+    wr_full_data_packet     = curr_req.hwdata;
+    wr_trans_addr           = curr_req.haddr;
+    `else
+    wr_full_data_packet     = curr_req.pwdata;
+    wr_trans_addr           = curr_req.paddr;
+    `endif
+endtask
+
+
+task write_into_memory();
+    //Slicing constraints
+     
+    `ifdef AXI_MEM_CTRL
+    int msb_of_slice;
+    msb_of_slice = ((total_beats-remaining_beats) *AXI_DATA_WIDTH) + AXI_DATA_WIDTH - 1;
+    `elsif AHB_MEM_CTRL
+    address = wr_trans_addr;
+    `else
+    address = wr_trans_addr;
+    `endif
+    //writing into Memory
+    `ifdef AXI_MEM_CTRL
+    data_out = wr_full_data_packet [msb_of_slice -: AXI_DATA_WIDTH];
+    `elsif AHB_MEM_CTRL
+    data_out = wr_full_data_packet;
+    `else
+    data_out = wr_full_data_packet;
+    `endif
+    rw = 1;
+endtask
+
+
+task write_trans_success();
+    mem_req_fifo_rreq = 0;
+    `ifdef AXI_MEM_CTRL
+    curr_resp.rw = 1;
+    curr_resp.resp = AXI_OKAY_RESP;
+    curr_resp.id   = curr_req.id;
+    mem_resp_fifo_pkt_op = curr_resp;
+    `elsif AHB_MEM_CTRL
+    mem_resp_fifo_pkt_op.hresp = AHB_OKAY;
+    mem_resp_fifo_wreq = 1;
+    `else
+    mem_resp_fifo_pkt_op.pslverr = 0;
+    mem_resp_fifo_pkt_op.prdata = 0;
+    mem_resp_fifo_wreq = 1;
+     `endif
+
+    address = 0;
+    data_out = 0;
+    rw = 0;
+endtask
+
+
+task generate_decode_err_for_write_trans();
+    mem_req_fifo_rreq = 0;
+    `ifdef AXI_MEM_CTRL
+    mem_resp_fifo_pkt_op.rw = 1;
+    mem_resp_fifo_pkt_op.resp = AXI_DECERR_RESP;
+    mem_resp_fifo_pkt_op.id   = curr_req.id;
+    `elsif AHB_MEM_CTRL
+    mem_resp_fifo_pkt_op.hresp = AHB_ERROR;
+    mem_resp_fifo_wreq = 1;
+    `else
+    mem_resp_fifo_pkt_op.pslverr = 1;
+    mem_resp_fifo_pkt_op.prdata = 0;
+    mem_resp_fifo_wreq = 1;
+     `endif
+
+    address = 0;
+    data_out = 0;
+    rw = 0;
+endtask
+ `ifdef AXI_MEM_CTRL
+task compute_wr_wrap_trans_info();
+    int container_size;
+    container_size = ((AXI_DATA_WIDTH/8)*total_beats);
+    lower_wrap_boundary = ((curr_req.addr/(container_size))*(container_size));
+    upper_wrap_boundary = lower_wrap_boundary + container_size;
+endtask
+`endif
+
+// *****************************************************************//
+// *****            READ RELATED TRANSACTION TASKS             *****//
+// *****************************************************************//
+
+task update_rd_trans_parameters();
+    `ifdef AXI_MEM_CTRL
+    rd_full_data_packet     = 0;
+    total_beats             = curr_req.len + 1'b1;    
+    remaining_beats_next    = curr_req.len + 1'b1;    
+    rd_trans_addr_next = curr_req.addr;
+    `elsif AHB_MEM_CTRL
+    rd_trans_addr = curr_req.haddr;
+    rd_data_packet     = curr_req.hwdata;
+    `else
+    rd_trans_addr = curr_req.paddr;
+    rd_data_packet     = curr_req.pwdata;
+    `endif
+    //ToDo::rd_trans_valid_message_byte = curr_req.valid_message_byte;
+    `ifdef MEM_CTRL
+    $display("[%0t]::%m::out::curr_req.paddr =%0h, curr_req.pwdata=%0h",$time(),curr_req.paddr,data_out);
+    `endif
+
+    `ifdef AXI_MEM_CTRL
+    compute_rd_wrap_trans_info();
+    `endif
+endtask
+
+task read_from_memory();
+    address = rd_trans_addr;
+    data_out = rd_data_packet;
+    rw = 0;
+    `ifdef MEM_CTRL
+    $display("[%0t]::%m::out::address =%0h,data_out=%0h",$time(),address,data_out);
+    $display("[%0t]::%m::in::rd_trans_addr =%0h,rd_data_packet=%0h",$time(),rd_trans_addr,rd_data_packet);
+`endif
+endtask
+
+task store_data_recieved_from_memory();
+   `ifdef AXI_MEM_CTRL
+    //Slicing constraints
+   int msb_of_slice;
+    msb_of_slice = ((total_beats-remaining_beats) *AXI_DATA_WIDTH) + AXI_DATA_WIDTH - 1;
+    
+    rd_full_data_packet[msb_of_slice -: AXI_DATA_WIDTH] = data_in;
+    `elsif AHB_MEM_CTRL
+    rd_full_data_packet = data_in;
+    `else
+    rd_full_data_packet = data_in;
+    `endif
+    `ifdef MEM_CTRL
+    $display("[%0t]::%m::data_in =%0h,rd_full_data_packet=%0h",$time(),data_in,rd_full_data_packet);
+`endif
+endtask
+
+task read_trans_success();
+    mem_req_fifo_rreq = 0;
+
+    `ifdef AXI_MEM_CTRL
+    mem_resp_fifo_pkt_op.r_data = 0;
+    mem_resp_fifo_pkt_op.valid_message_byte = rd_trans_valid_message_byte;
+    mem_resp_fifo_pkt_op.id                 = curr_req.id;
+    mem_resp_fifo_pkt_op.resp               = AXI_OKAY_RESP;
+    `elsif AHB_MEM_CTRL
+    mem_resp_fifo_wreq = 1;
+    mem_resp_fifo_pkt_op.hrdata               = rd_full_data_packet;
+    mem_resp_fifo_pkt_op.hresp                = AHB_OKAY;
+    $display("[%0t]::%m::data_in =%0h,mem_resp_fifo_pkt_op.hrdata=%0h",$time(),data_in,mem_resp_fifo_pkt_op.hrdata);
+    `else
+    mem_resp_fifo_wreq = 1;
+    mem_resp_fifo_pkt_op.prdata               = rd_full_data_packet;
+    mem_resp_fifo_pkt_op.pslverr              = 0;
+    `endif
+    address = 0;
+    data_out = 0;
+    rw = 0;
+endtask
+
+
+task generate_decode_err_for_read_trans();
+    mem_req_fifo_rreq = 0;
+
+    `ifdef AXI_MEM_CTRL
+    mem_resp_fifo_pkt_op.r_data = 0;
+    mem_resp_fifo_pkt_op.valid_message_byte = 0;
+    mem_resp_fifo_pkt_op.id               = curr_req.id;
+    mem_resp_fifo_pkt_op.resp             = AXI_DECERR_RESP;
+    `elsif AHB_MEM_CTRL
+    mem_resp_fifo_wreq = 1;
+    mem_resp_fifo_pkt_op.hrdata = 0;
+    mem_resp_fifo_pkt_op.hresp = AHB_ERROR;
+    `else
+    mem_resp_fifo_wreq = 1;
+    mem_resp_fifo_pkt_op.prdata = 0;
+    mem_resp_fifo_pkt_op.pslverr = 1;
+     `endif
+
+    address = 0;
+    data_out = 0;
+    rw = 0;
+endtask
+
+ `ifdef AXI_MEM_CTRL        
+task compute_rd_wrap_trans_info();
+    int container_size;
+    container_size = ((AXI_DATA_WIDTH/8)*total_beats);
+    lower_wrap_boundary = ((curr_req.addr/(container_size))*(container_size));
+    upper_wrap_boundary = lower_wrap_boundary + container_size;
+endtask
+ `endif
+endmodule
+
+

@@ -1,0 +1,5 @@
+#!/bin/csh
+rm -rf *.log vcst_rtdb verdiLog *.bak *.rpt *novas novas* results.txt batch_results* .certitudeGUI* .dw_map_file*
+
+# for running in gui mode:
+vcf -f ../../run_vcf.tcl -verdi

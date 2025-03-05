@@ -1,0 +1,47 @@
+#include "systemc.h" 
+SC_MODULE(stim) {
+	sc_out < sc_uint<32> > in_a,in_b;
+	sc_out < sc_uint<4> > command;
+	sc_in<bool> Clk;
+
+	void StimGen()   {
+
+                valid.write(1);
+		in_a.write(0b111);     
+		in_b.write(0b001);
+		command.write(0);
+
+		wait(10,SC_NS);
+
+		in_a.write(0b111);     
+		in_b.write(0b001);
+		command.write(1);
+
+		wait(10,SC_NS);
+
+		in_a.write(0b111);     
+		in_b.write(0b001);
+		command.write(2);
+
+		wait(10,SC_NS);
+
+		in_a.write(0b111);     
+		in_b.write(0b001);
+		command.write(6);
+
+		wait(10,SC_NS);
+
+		in_a.write(0b111);     
+		in_b.write(0b001);
+		command.write(4);
+
+                wait(10,SC_NS);
+
+
+		sc_stcommand();   
+	}   
+
+	SC_CTOR(stim)   {
+		SC_THREAD(StimGen);
+	} 
+};

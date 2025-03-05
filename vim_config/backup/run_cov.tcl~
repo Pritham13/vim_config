@@ -1,0 +1,13 @@
+#add commant to compute formal core in block mode
+compute_formal_core -property [get_props -status proven] -block
+
+#add command to compute formal core coverage in block mode
+compute_formal_core_coverage -property [get_props -status proven] -par_task FPV -block
+
+#add command to save formal core results to a coverage database
+save_formal_core_results -db_name formal_core_cov
+
+#add command to save uncoverable coverage goals in exclusion file
+save_cov_exclusion -file uncoverables.el
+
+ 

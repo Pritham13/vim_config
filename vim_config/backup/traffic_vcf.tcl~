@@ -1,0 +1,36 @@
+### set the following in cshrc
+# set DUT_DIR  ../../../dut
+
+## VC Formal app mode ##
+#set_app_var fml_mode_on true
+set_fml_appmode FPV
+
+## analyse ##
+analyze -format sverilog \
+-vcs {  \
+${DUT_DIR}/tl_package.sv \
+${DUT_DIR}/traffic_light_controller_0.sv \
+${DUT_DIR}/traffic_junction_0.sv \
+}
+
+## elaborate ##
+elaborate traffic_junction -sva
+#elaborate traffic_light_controller -sva
+
+## Clock and reset ##
+create_clock clk -period 100
+create_reset rst -sense low
+
+## Initialise by simulation ##
+sim_run -stable
+sim_save_reset
+
+## Formal check in gui mode
+#check_fv_setup -block
+#report_fv_setup -block
+
+# formal check in batch mode
+check_fv -block
+report_fv -list
+#save_session -session batch_results
+

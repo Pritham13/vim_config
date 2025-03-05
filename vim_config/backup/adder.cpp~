@@ -1,0 +1,33 @@
+#include "Hector.h"
+#include <stdint.h>
+
+int full_adder(bool in_a,bool in_b,bool in_c ,bool valid , bool &sum , bool &carry){
+    if (valid) {
+        // Calculating value of sum
+        sum = ( (in_a ^ in_b)^in_c) ;
+        //Calculating value of C-Out
+        carry = ((in_a & in_b) | (in_b & in_c) | (in_a & in_c));
+    }
+    return 0;
+  }
+int DPV_wrapper () {
+    bool in_a ;
+    bool in_b ;
+    bool in_c;
+    bool valid;
+    bool sum;
+    bool carry;
+
+    Hector::registerInput ("in_a" , in_a );
+    Hector::registerInput ("in_b" , in_b );
+    Hector::registerInput ("in_c" , in_c );
+    Hector::registerInput ("valid" , valid );
+    Hector::registerOutput ("sum" , sum );
+    Hector::registerOutput ("carry" , carry);
+    Hector::beginCapture();
+        carry = 0;
+        sum = 0;
+        full_adder(in_a,in_b,in_c,valid,sum,carry);
+    Hector::endCapture();
+
+}
