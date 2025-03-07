@@ -1,2 +1,0 @@
-#!/usr/bin/csh
-g++ -I. -I$SYSTEMC_HOME/include -Iinc -L. -L$SYSTEMC_HOME/lib-linux64 -Wl,-rpath=$SYSTEMC_HOME/lib-linux64 ../c/*.cpp -o a.out 

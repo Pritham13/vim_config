@@ -1,5 +1,0 @@
-
-
-#!/bin/csh -f
-
-vcf -f run.tcl -fmode DPV -gui -fml_elite &
